@@ -1,6 +1,20 @@
 #include "ShipUtils.h"
-#include <libultraship/libultraship.h>
 #include "assets/2s2h_assets.h"
+#include <string>
+#include <bit>
+#include <random>
+#include <vector>
+#include <cassert>
+#include <libultraship/bridge/consolevariablebridge.h>
+#include <ship/Context.h>
+#include <ship/window/Window.h>
+// Image Icons
+#include "assets/interface/parameter_static/parameter_static.h"
+#include "assets/archives/icon_item_24_static/icon_item_24_static_yar.h"
+#include "assets/archives/icon_item_static/icon_item_static_yar.h"
+#include "assets/interface/icon_item_dungeon_static/icon_item_dungeon_static.h"
+#include "assets/interface/icon_item_field_static/icon_item_field_static.h"
+#include "assets/objects/gameplay_keep/gameplay_keep.h"
 
 extern "C" {
 #include "z64.h"
@@ -14,6 +28,95 @@ extern const char* fontTbl[156];
 extern TexturePtr gItemIcons[131];
 extern TexturePtr gQuestIcons[14];
 extern TexturePtr gBombersNotebookPhotos[24];
+}
+
+// 2S2H Added columns to scene table: entranceSceneId, betterMapSelectIndex, humanName
+#define DEFINE_SCENE(_name, enumValue, _textId, _drawConfig, _restrictionFlags, _persistentCycleFlags, \
+                     _entranceSceneId, _betterMapSelectIndex, humanName)                               \
+    { enumValue, humanName },
+#define DEFINE_SCENE_UNSET(_enumValue)
+
+std::unordered_map<s16, const char*> sceneNames = {
+#include "tables/scene_table.h"
+};
+
+#undef DEFINE_SCENE
+#undef DEFINE_SCENE_UNSET
+
+// These textures are not in existing lists that we iterate over.
+std::array<const char*, 22> miscellaneousTextures = {
+    gArcheryScoreIconTex,
+    gBarrelTrackerIcon,
+    gChestTrackerIcon,
+    gCrateTrackerIcon,
+    gDungeonStrayFairyGreatBayIconTex,
+    gDungeonStrayFairySnowheadIconTex,
+    gDungeonStrayFairyStoneTowerIconTex,
+    gDungeonStrayFairyWoodfallIconTex,
+    gPotTrackerIcon,
+    gQuestIconGoldSkulltulaTex,
+    gMagicArrowEquipEffectTex,
+    gRupeeCounterIconTex,
+    gStrayFairyGreatBayIconTex,
+    gStrayFairySnowheadIconTex,
+    gStrayFairyStoneTowerIconTex,
+    gStrayFairyWoodfallIconTex,
+    gTimerClockIconTex,
+    gTriforcePieceTex,
+    gWorldMapOwlFaceTex,
+    gameplay_keep_Tex_053140,
+    gDungeonMapSkullTex,
+    gPauseUnusedCursorTex,
+};
+
+std::array<const char*, 11> digitList = { gCounterDigit0Tex, gCounterDigit1Tex, gCounterDigit2Tex, gCounterDigit3Tex,
+                                          gCounterDigit4Tex, gCounterDigit5Tex, gCounterDigit6Tex, gCounterDigit7Tex,
+                                          gCounterDigit8Tex, gCounterDigit9Tex, gCounterColonTex };
+
+std::map<uint32_t, ImVec4> itemColorMap = {
+    { ITEM_SONG_SONATA, ImVec4(0.588f, 1.0f, 0.392f, 1.0f) },
+    { ITEM_SONG_LULLABY, ImVec4(1.0f, 0.313f, 0.156f, 1.0f) },
+    { ITEM_SONG_NOVA, ImVec4(0.392f, 0.588f, 1.0f, 1.0f) },
+    { ITEM_SONG_ELEGY, ImVec4(1.0f, 0.627f, 0.0f, 1.0f) },
+    { ITEM_SONG_OATH, ImVec4(1.0f, 0.392f, 1.0f, 1.0f) },
+    { ITEM_SONG_LULLABY_INTRO, ImVec4(1.0f, 0.313f, 0.156f, 1.0f) },
+};
+
+ImVec4 Ship_GetItemColorTint(uint32_t itemId) {
+    auto findColor = itemColorMap.find(itemId);
+    if (findColor != itemColorMap.end()) {
+        return findColor->second;
+    } else {
+        return ImVec4(1, 1, 1, 1);
+    }
+}
+
+extern "C" const char* Ship_GetSceneName(s16 sceneId) {
+    if (sceneNames.contains(sceneId)) {
+        return sceneNames[sceneId];
+    }
+
+    return "Unknown";
+}
+
+std::string Ship_FormatTimeDisplay(uint32_t value) {
+    uint32_t sec = value / 10;
+    uint32_t hh = sec / 3600;
+    uint32_t mm = (sec - hh * 3600) / 60;
+    uint32_t ss = sec - hh * 3600 - mm * 60;
+    uint32_t ds = value % 10;
+    return fmt::format("{}:{:0>2}:{:0>2}.{}", hh, mm, ss, ds);
+}
+
+std::string Ship_RemoveSpecialCharacters(const std::string& str) {
+    std::string result;
+    for (char ch : str) {
+        // Only keep alphanumeric characters (letters and digits)
+        if (std::isalnum(static_cast<unsigned char>(ch))) {
+            result += ch;
+        }
+    }
+    return result;
 }
 
 constexpr f32 fourByThree = 4.0f / 3.0f;
@@ -100,17 +203,144 @@ extern "C" TexturePtr Ship_GetCharFontTextureNES(u8 character) {
     return (TexturePtr)fontTbl[adjustedChar];
 }
 
+static bool seeded = false;
+static uint64_t state = 0;
+const uint64_t multiplier = 6364136223846793005ULL;
+const uint64_t increment = 11634580027462260723ULL;
+
+extern "C" void Ship_Random_Seed(u64 seed) {
+    seeded = true;
+    state = seed;
+}
+
+uint32_t next32() {
+    if (!seeded) {
+        uint64_t seed = static_cast<uint64_t>(std::random_device{}());
+        Ship_Random_Seed(seed);
+    }
+    state = state * multiplier + increment;
+    uint32_t xorshifted = static_cast<uint32_t>(((state >> 18) ^ state) >> 27);
+    uint32_t rot = static_cast<int>(state >> 59);
+    return std::rotr(xorshifted, rot);
+}
+
+extern "C" s32 Ship_Random(s32 min, s32 max) {
+    if (min == max) {
+        return min;
+    }
+    assert(max > min);
+    uint32_t n = max - min;
+    uint32_t cutoff = UINT32_MAX - UINT32_MAX % static_cast<uint32_t>(n);
+    for (;;) {
+        uint32_t r = next32();
+        if (r <= cutoff) {
+            return min + r % n;
+        }
+    }
+}
+
+extern uint32_t Ship_Hash(std::string str) {
+    // FNV-1a
+    const size_t len = str.size();
+    uint32_t hval = 0x811c9dc5;
+    for (size_t pos = 0; pos < len; pos++) {
+        hval ^= (uint32_t)str[pos];
+        hval *= 0x01000193;
+    }
+    return hval;
+}
+
 void LoadGuiTextures() {
-    for (TexturePtr entry : gItemIcons) {
-        const char* path = static_cast<const char*>(entry);
+    for (const TexturePtr entry : gItemIcons) {
+        auto path = static_cast<const char*>(entry);
         Ship::Context::GetInstance()->GetWindow()->GetGui()->LoadGuiTexture(path, path, ImVec4(1, 1, 1, 1));
     }
-    for (TexturePtr entry : gQuestIcons) {
-        const char* path = static_cast<const char*>(entry);
+    for (const TexturePtr entry : gQuestIcons) {
+        auto path = static_cast<const char*>(entry);
         Ship::Context::GetInstance()->GetWindow()->GetGui()->LoadGuiTexture(path, path, ImVec4(1, 1, 1, 1));
     }
-    for (TexturePtr entry : gBombersNotebookPhotos) {
-        const char* path = static_cast<const char*>(entry);
+    for (const TexturePtr entry : gBombersNotebookPhotos) {
+        auto path = static_cast<const char*>(entry);
         Ship::Context::GetInstance()->GetWindow()->GetGui()->LoadGuiTexture(path, path, ImVec4(1, 1, 1, 1));
     }
+    for (const auto entry : miscellaneousTextures) {
+        Ship::Context::GetInstance()->GetWindow()->GetGui()->LoadGuiTexture(entry, entry, ImVec4(1, 1, 1, 1));
+    }
+    for (const auto entry : digitList) {
+        Ship::Context::GetInstance()->GetWindow()->GetGui()->LoadGuiTexture(entry, entry, ImVec4(1, 1, 1, 1));
+    }
+}
+
+std::string CreateStartingItemsToCvar(std::vector<RandoItemId> startingItemList) {
+    std::string startingItemsStr = "";
+    for (auto& item : startingItemList) {
+        if (startingItemsStr != "") {
+            startingItemsStr += ",";
+        }
+        startingItemsStr += std::to_string(item).c_str();
+    }
+
+    return startingItemsStr;
+}
+
+std::vector<RandoItemId> convertStartingItemsToRandoItemId(const std::string& input, const std::string& delimiter) {
+    std::vector<RandoItemId> result;
+    size_t start = 0;
+    size_t end = input.find(delimiter);
+
+    while (end != std::string::npos) {
+        std::string item = input.substr(start, end - start);
+        if (!item.empty()) {
+            result.push_back(static_cast<RandoItemId>(std::stoul(item)));
+        }
+        start = end + delimiter.length();
+        end = input.find(delimiter, start);
+    }
+
+    if (!input.substr(start).empty()) {
+        result.push_back(static_cast<RandoItemId>(std::stoul(input.substr(start))));
+    }
+
+    return result;
+}
+
+std::string convertEnumToReadableName(const std::string& input) {
+    std::string result;
+    std::string content = input;
+
+    // Step 1: Remove "RC_" prefix if present
+    const std::string prefix = "RC_";
+    if (content.rfind(prefix, 0) == 0) {
+        content = content.substr(prefix.size());
+    }
+
+    // Step 2: Split the string by '_'
+    std::vector<std::string> words;
+    std::string word;
+    std::istringstream stream(content);
+    while (std::getline(stream, word, '_')) {
+        words.push_back(word);
+    }
+
+    // Step 3: Capitalize the first letter of each word
+    for (auto& w : words) {
+        std::transform(w.begin(), w.end(), w.begin(), [](unsigned char c) { return std::tolower(c); });
+        if (!w.empty()) {
+            if (w == "hp") {
+                w = "HP";
+            } else {
+                w[0] = std::toupper(w[0]);
+            }
+        }
+    }
+
+    // Step 4: Join the words with spaces
+    for (size_t i = 0; i < words.size(); ++i) {
+        result += words[i];
+        if (i < words.size() - 1) {
+            result += " ";
+        }
+    }
+
+    return result;
 }

@@ -43,3 +43,12 @@ Picto box images render black. <br>
 <h3>Build Instructions:</h3>
 1. Edit the app/build.gradle file to point to your ndk folder. NDK 26+ tested as working.<br>
 2. Open the project in android studio and build.<br>
+
+---
+
+<a href="https://github.com/Kenix3/libultraship/">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./docs/poweredbylus.darkmode.png">
+    <img alt="Powered by libultraship" src="./docs/poweredbylus.lightmode.png">
+  </picture>
+</a>

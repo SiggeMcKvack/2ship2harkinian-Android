@@ -63,7 +63,7 @@ void wait_for_java_setup() {
 #endif
 
 void InitOTR();
-
+void Heaps_Free(void);
 #ifdef __GNUC__
 #define SDL_main main
 #endif
@@ -102,7 +102,7 @@ void SDL_main(int argc, char** argv /* void* arg*/) {
     Check_RegionIsSupported();
     Check_ExpansionPak();
     sysHeap = gSystemHeap;
-    // fb = 0x80780000;
+    // fb = FRAMEBUFFERS_START_ADDR;
     // gSystemHeapSize = fb - sysHeap;
     SystemHeap_Init(sysHeap, SYSTEM_HEAP_SIZE);
 
@@ -168,4 +168,5 @@ void SDL_main(int argc, char** argv /* void* arg*/) {
 #ifdef _WIN32
     FreeConsole();
 #endif
+    Heaps_Free();
 }

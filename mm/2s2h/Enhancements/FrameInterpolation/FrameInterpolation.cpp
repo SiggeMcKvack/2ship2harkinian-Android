@@ -1,4 +1,4 @@
-#include <libultraship/bridge.h>
+#include <libultraship/bridge/consolevariablebridge.h>
 
 #include <vector>
 #include <map>
@@ -58,7 +58,7 @@ void Matrix_TranslateRotateZYX(Vec3f* translation, Vec3s* rotation);
 void Matrix_SetTranslateRotateYXZ(f32 translateX, f32 translateY, f32 translateZ, Vec3s* rot);
 Mtx* Matrix_MtxFToMtx(MtxF* src, Mtx* dest);
 Mtx* Matrix_ToMtx(Mtx* dest, char* file, s32 line);
-Mtx* Matrix_NewMtx(struct GraphicsContext* gfxCtx, char* file, s32 line);
+Mtx* Matrix_Finalize(struct GraphicsContext* gfxCtx, char* file, s32 line);
 Mtx* Matrix_MtxFToNewMtx(MtxF* src, struct GraphicsContext* gfxCtx);
 void Matrix_MultVec3f(Vec3f* src, Vec3f* dest);
 void Matrix_MtxFCopy(MtxF* dest, MtxF* src);
@@ -474,6 +474,10 @@ void FrameInterpolation_StartRecord(void) {
     current_recording = {};
     current_path.clear();
     current_path.push_back(&current_recording.root_path);
+    has_inv_actor_mtx = false;
+    interpolate_wider_angles = false;
+    ignore_inv_actor_mtx = false;
+
     if (!camera_interpolation) {
         // default to interpolating
         camera_interpolation = true;
@@ -523,12 +527,16 @@ int FrameInterpolation_GetCameraEpoch(void) {
 // Marks the current record path and its children to not apply the matrix result
 // against the recorded actor inverted matrix
 void FrameInterpolation_IgnoreActorMtx() {
+    if (!is_recording)
+        return;
     ignore_inv_actor_mtx = true;
     ignore_inv_actor_mtx_path_index = current_path.size();
 }
 
 // Allows interpolating from angle changes that are up to 123º for the next SetTranslateRotateYXZ
 void FrameInterpolation_InterpolateWiderAngles() {
+    if (!is_recording)
+        return;
     interpolate_wider_angles = true;
 }
 
