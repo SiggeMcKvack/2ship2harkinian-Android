@@ -26,10 +26,7 @@ enum class RomSearchMode {
 };
 
 class Extractor {
-    std::unique_ptr<unsigned char[]> mRomData = std::make_unique<unsigned char[]>(MB64);
-    std::string mCurrentRomPath;
     std::string mSearchPath;
-    size_t mCurRomSize = 0;
 
     bool GetRomPathFromBox();
 
@@ -42,8 +39,6 @@ class Extractor {
     bool ValidateNotCompressed() const;
     const char* GetZapdVerStr() const;
 
-    void SetRomInfo(const std::string& path);
-
     void FilterRoms(std::vector<std::string>& roms, RomSearchMode searchMode);
     void GetRoms(std::vector<std::string>& roms);
     void ShowSizeErrorBox() const;
@@ -54,6 +49,11 @@ class Extractor {
     bool ManuallySearchForRomMatchingType(RomSearchMode searchMode);
 
   public:
+    // Made public for Android JNI extraction
+    std::unique_ptr<unsigned char[]> mRomData = std::make_unique<unsigned char[]>(MB64);
+    std::string mCurrentRomPath;
+    size_t mCurRomSize = 0;
+    void SetRomInfo(const std::string& path);
     // TODO create some kind of abstraction for message boxes.
     static int ShowYesNoBox(const char* title, const char* text);
     static void ShowErrorBox(const char* title, const char* text);

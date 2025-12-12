@@ -3,4 +3,15 @@
     <color name="colorPrimary">#3F51B5</color>
     <color name="colorPrimaryDark">#303F9F</color>
     <color name="colorAccent">#FF4081</color>
+
+    <!-- Launcher colors (dark theme) -->
+    <color name="launcher_background">#1A1A2E</color>
+    <color name="card_background">#16213E</color>
+    <color name="primary">#E94560</color>
+    <color name="primary_dark">#C73E54</color>
+    <color name="text_primary">#EAEAEA</color>
+    <color name="text_secondary">#B0B0B0</color>
+    <color name="text_hint">#707070</color>
+    <color name="success">#4CAF50</color>
+    <color name="error">#F44336</color>
 </resources>

@@ -17,6 +17,15 @@ android {
     buildFeatures {
         buildConfig true
     }
+
+    // Fix Kotlin stdlib version conflicts from Material Design dependencies
+    configurations.all {
+        resolutionStrategy {
+            force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.10'
+            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.10'
+            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.10'
+        }
+    }
     ndkVersion "26.0.10792818"
     compileSdkVersion 33
     defaultConfig {
@@ -89,6 +98,9 @@ dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation 'androidx.core:core:1.7.0' // Use the latest version
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+    implementation 'com.google.android.material:material:1.9.0'
+    implementation 'androidx.cardview:cardview:1.0.0'
+    implementation 'androidx.activity:activity:1.7.2'
 }
 
 task wrapper(type: Wrapper) {

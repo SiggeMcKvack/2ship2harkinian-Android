@@ -577,7 +577,7 @@ void DetectArchiveVersion(std::string fileName, bool isO2rType) {
     }
 
     if (isArchiveOld) {
-#if not defined(__SWITCH__) && not defined(__WIIU__)
+#if not defined(__SWITCH__) && not defined(__WIIU__) && not defined(__ANDROID__)
         char msgBuf[250];
         char version[18]; // 5 digits for int16_max (x3) + separators + terminator
 
@@ -624,6 +624,10 @@ void DetectArchiveVersion(std::string fileName, bool isO2rType) {
             exit(1);
         }
 
+#elif defined(__ANDROID__)
+        // On Android, delete old O2R and let LauncherActivity handle regeneration
+        std::filesystem::remove(archivePath);
+        SPDLOG_INFO("Deleted old O2R file: {}. LauncherActivity will handle regeneration.", archivePath);
 #elif defined(__SWITCH__)
         Ship::Switch::PrintErrorMessageToScreen("\x1b[2;2HYou've launched the 2Ship with an old game O2R file."
                                                 "\x1b[4;2HPlease regenerate a new game O2R and relaunch."
@@ -689,6 +693,15 @@ extern "C" void InitOTR() {
             exit(1);
         }
 
+#if defined(__ANDROID__)
+        // On Android, automatically run extraction without dialog (LauncherActivity already validated ROM)
+        Extractor extract;
+        if (!extract.Run(Ship::Context::GetAppDirectoryPath(appShortName))) {
+            Extractor::ShowErrorBox("Error", "An error occurred, no O2R file was generated. Exiting...");
+            exit(1);
+        }
+        extract.CallZapd(installPath, Ship::Context::GetAppDirectoryPath(appShortName));
+#else
         if (Extractor::ShowYesNoBox("No O2R File", "No O2R files found. Generate one now?") == IDYES) {
             Extractor extract;
             if (!extract.Run(Ship::Context::GetAppDirectoryPath(appShortName))) {
@@ -699,6 +712,7 @@ extern "C" void InitOTR() {
         } else {
             exit(1);
         }
+#endif
     }
 #endif
 

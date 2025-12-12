@@ -42,6 +42,7 @@
 #include <SDL2/SDL.h>
 #include <jni.h>
 #include <string>
+#include <thread>
 #endif
 
 #include <stdlib.h>
@@ -82,6 +83,18 @@ enum class ButtonId : int {
 const char* javaRomPath = NULL;
 bool fileDialogOpen = false;
 
+// Global references for LauncherActivity progress callbacks
+static JavaVM* g_jvm = nullptr;
+static jobject g_launcherActivity = nullptr;
+static jmethodID g_onProgressMethod = nullptr;
+static jmethodID g_onCompleteMethod = nullptr;
+
+// Called when JNI loads
+extern "C" JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
+    g_jvm = vm;
+    return JNI_VERSION_1_6;
+}
+
 //function to be called from C
 void openFilePickerFromC(JNIEnv* env, jobject javaObject) {
     fileDialogOpen = true;
@@ -95,6 +108,117 @@ extern "C" void JNICALL Java_com_dishii_mm_MainActivity_nativeHandleSelectedFile
     javaRomPath = strdup(filePathStr); // save filepath to string
     fileDialogOpen = false;
     env->ReleaseStringUTFChars(filePath, filePathStr);
+}
+
+// Store launcher activity reference for progress callbacks
+extern "C" JNIEXPORT void JNICALL
+Java_com_dishii_mm_LauncherActivity_nativeSetProgressCallback(JNIEnv* env, jobject activity) {
+    // Create global reference to activity
+    if (g_launcherActivity != nullptr) {
+        env->DeleteGlobalRef(g_launcherActivity);
+    }
+    g_launcherActivity = env->NewGlobalRef(activity);
+
+    // Cache method IDs
+    jclass clazz = env->GetObjectClass(activity);
+    g_onProgressMethod = env->GetMethodID(clazz, "onExtractionProgress", "(ILjava/lang/String;)V");
+    g_onCompleteMethod = env->GetMethodID(clazz, "onExtractionComplete", "(Z)V");
+}
+
+// Send progress update to Java
+static void sendProgressToJava(int percent, const char* currentFile) {
+    if (g_jvm == nullptr || g_launcherActivity == nullptr || g_onProgressMethod == nullptr) return;
+
+    JNIEnv* env;
+    bool attached = false;
+
+    if (g_jvm->GetEnv((void**)&env, JNI_VERSION_1_6) == JNI_EDETACHED) {
+        g_jvm->AttachCurrentThread(&env, nullptr);
+        attached = true;
+    }
+
+    jstring jFile = env->NewStringUTF(currentFile ? currentFile : "");
+    env->CallVoidMethod(g_launcherActivity, g_onProgressMethod, percent, jFile);
+    env->DeleteLocalRef(jFile);
+
+    if (attached) {
+        g_jvm->DetachCurrentThread();
+    }
+}
+
+// Send completion status to Java
+static void sendCompletionToJava(bool success) {
+    if (g_jvm == nullptr || g_launcherActivity == nullptr || g_onCompleteMethod == nullptr) return;
+
+    JNIEnv* env;
+    bool attached = false;
+
+    if (g_jvm->GetEnv((void**)&env, JNI_VERSION_1_6) == JNI_EDETACHED) {
+        g_jvm->AttachCurrentThread(&env, nullptr);
+        attached = true;
+    }
+
+    env->CallVoidMethod(g_launcherActivity, g_onCompleteMethod, success);
+
+    if (attached) {
+        g_jvm->DetachCurrentThread();
+    }
+}
+
+// Native extraction entry point from launcher
+extern "C" JNIEXPORT void JNICALL
+Java_com_dishii_mm_LauncherActivity_nativeStartExtraction(
+    JNIEnv* env, jobject activity,
+    jstring romPath, jstring installPath, jstring exportPath) {
+
+    const char* romPathStr = env->GetStringUTFChars(romPath, nullptr);
+    const char* installPathStr = env->GetStringUTFChars(installPath, nullptr);
+    const char* exportPathStr = env->GetStringUTFChars(exportPath, nullptr);
+
+    // Copy strings for use in background thread
+    std::string romPathCopy = romPathStr;
+    std::string installPathCopy = installPathStr;
+    std::string exportPathCopy = exportPathStr;
+
+    env->ReleaseStringUTFChars(romPath, romPathStr);
+    env->ReleaseStringUTFChars(installPath, installPathStr);
+    env->ReleaseStringUTFChars(exportPath, exportPathStr);
+
+    // Run extraction in background thread
+    std::thread extractThread([romPathCopy, installPathCopy, exportPathCopy]() {
+        sendProgressToJava(5, "Initializing...");
+
+        Extractor extract;
+        extract.SetRomInfo(romPathCopy);
+
+        // Read ROM data
+        sendProgressToJava(10, "Reading ROM...");
+        std::ifstream inFile(romPathCopy, std::ios::in | std::ios::binary);
+        if (!inFile.is_open()) {
+            sendCompletionToJava(false);
+            return;
+        }
+
+        size_t romSize = std::filesystem::file_size(romPathCopy);
+        auto romData = std::make_unique<uint8_t[]>(romSize);
+        inFile.read((char*)romData.get(), romSize);
+        inFile.close();
+
+        sendProgressToJava(20, "Processing ROM...");
+        BitConverter::RomToBigEndian(romData.get(), romSize);
+
+        // Store ROM data in extractor
+        memcpy(extract.mRomData.get(), romData.get(), romSize);
+
+        sendProgressToJava(30, "Starting extraction...");
+
+        // Call ZAPD extraction
+        bool success = !extract.CallZapd(installPathCopy, exportPathCopy);
+
+        sendProgressToJava(100, "Complete");
+        sendCompletionToJava(success);
+    });
+    extractThread.detach();
 }
 
 #endif
@@ -126,6 +250,10 @@ void Extractor::ShowCompressedErrorBox() const {
 }
 
 int Extractor::ShowRomPickBox(uint32_t verCrc) const {
+#ifdef __ANDROID__
+    // On Android, LauncherActivity already validated the ROM, so auto-select Yes
+    return 0; // ButtonId::YES
+#else
     std::unique_ptr<char[]> boxBuffer = std::make_unique<char[]>(mCurrentRomPath.size() + 100);
     SDL_MessageBoxData boxData = { 0 };
     SDL_MessageBoxButtonData buttons[3] = { { 0 } };
@@ -152,6 +280,7 @@ int Extractor::ShowRomPickBox(uint32_t verCrc) const {
 
     SDL_ShowMessageBox(&boxData, &ret);
     return ret;
+#endif
 }
 
 int Extractor::ShowYesNoBox(const char* title, const char* box) {
@@ -565,7 +694,8 @@ std::string Extractor::Mkdtemp() {
 #ifndef __ANDROID__
     std::string temp_dir = std::filesystem::temp_directory_path().string();
 #else
-    std::string temp_dir = SDL_AndroidGetExternalStoragePath();
+    // Use app's private external storage (Android/data/com.dishii.mm/files/)
+    std::string temp_dir = "/storage/emulated/0/Android/data/com.dishii.mm/files";
 #endif
 
     // create 6 random alphanumeric characters

@@ -1,29 +1,17 @@
-
 package com.dishii.mm;
 import org.libsdl.app.SDLActivity;
 
-import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
-import android.os.Environment;
-import android.provider.Settings;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.FileOutputStream;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executors;
-
-import android.Manifest;
-import android.content.pm.PackageManager;
-import androidx.core.app.ActivityCompat;
-import androidx.core.content.ContextCompat;
-import android.os.Build;
-import android.widget.Toast;
 
 import android.util.Log;
 
@@ -43,18 +31,19 @@ public class MainActivity extends SDLActivity{
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-
         preferences = getSharedPreferences("com.dishii.mm.prefs",Context.MODE_PRIVATE);
 
-        // Check if storage permissions are granted
-        if (hasStoragePermission()) {
-            doVersionCheck();
-            checkAndSetupFiles();
-        } else {
-            requestStoragePermission();
-        }
+        // LauncherActivity handles permissions and initial setup
+        // MainActivity is only launched when files are ready
+        doVersionCheck();
+
+        // Signal that setup is complete (for native code waiting)
+        setupLatch.countDown();
 
         super.onCreate(savedInstanceState);
+
+        // Enable immersive fullscreen (SDLActivity defaults to false)
+        setWindowStyle(true);
 
         setupControllerOverlay();
         attachController();
@@ -79,7 +68,8 @@ public class MainActivity extends SDLActivity{
     }
 
     private void deleteOutdatedAssets() {
-        File targetRootFolder = new File(Environment.getExternalStorageDirectory(), "2S2H");
+        // Use app's private external storage (Android/data/com.dishii.mm/files/)
+        File targetRootFolder = getExternalFilesDir(null);
 
         File sohFile = new File(targetRootFolder, "2ship.o2r");
         File ootFile = new File(targetRootFolder, "mm.o2r");
@@ -125,171 +115,7 @@ public class MainActivity extends SDLActivity{
 
 
 
-    // Check if storage permission is granted
-    private boolean hasStoragePermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // Android 11+ requires MANAGE_EXTERNAL_STORAGE
-            return Environment.isExternalStorageManager();
-        } else {
-            return ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
-                    == PackageManager.PERMISSION_GRANTED &&
-                    ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                            == PackageManager.PERMISSION_GRANTED;
-        }
-    }
-
-    private static final int STORAGE_PERMISSION_REQUEST_CODE = 2296;
     private static final int FILE_PICKER_REQUEST_CODE = 0;
-
-    private void requestStoragePermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // Android 11+ → MANAGE_EXTERNAL_STORAGE
-            if (!Environment.isExternalStorageManager()) {
-                Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
-                intent.setData(Uri.parse("package:" + getPackageName()));
-                startActivityForResult(intent, STORAGE_PERMISSION_REQUEST_CODE);
-            } else {
-                // Already granted
-                checkAndSetupFiles();
-            }
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            // Android 6–10 → request READ/WRITE at runtime
-            ActivityCompat.requestPermissions(this,
-                    new String[]{
-                            Manifest.permission.READ_EXTERNAL_STORAGE,
-                            Manifest.permission.WRITE_EXTERNAL_STORAGE
-                    },
-                    STORAGE_PERMISSION_REQUEST_CODE);
-        } else {
-            // Below Android 6 → permissions granted at install time
-            checkAndSetupFiles();
-        }
-    }
-
-    public void checkAndSetupFiles() {
-        File targetRootFolder = new File(Environment.getExternalStorageDirectory(), "2S2H");
-        File assetsFolder = new File(targetRootFolder, "assets");
-        File sohOtrFile = new File(targetRootFolder, "2ship.o2r");
-
-        boolean isMissingAssets = !assetsFolder.exists() || assetsFolder.listFiles() == null || assetsFolder.listFiles().length == 0;
-        boolean isMissingSohOtr = !sohOtrFile.exists();
-
-        if (!targetRootFolder.exists() || isMissingAssets || isMissingSohOtr) {
-            new AlertDialog.Builder(this)
-                    .setTitle("Setup Required")
-                    .setMessage("Some required files are missing. The app will create them (~30s). Press OK to begin.")
-                    .setCancelable(false)
-                    .setPositiveButton("OK", (dialog, which) -> {
-                        Executors.newSingleThreadExecutor().execute(() -> {
-                            runOnUiThread(() -> Toast.makeText(this, "Setting up files...", Toast.LENGTH_SHORT).show());
-                            setupFilesInBackground(targetRootFolder);
-                        });
-                    })
-                    .show();
-        } else {
-            // No setup needed, still need to count down
-            setupLatch.countDown();
-        }
-    }
-
-
-    private void setupFilesInBackground(File targetRootFolder) {
-
-        File sourceOldRoot = getExternalFilesDir(null);
-        File sourceSavesDir = new File(sourceOldRoot, "saves"); // how to tell if there's anything to migrate
-
-        // === Migration from old Android/data/.../files/ directory ===
-        if (sourceOldRoot != null && sourceSavesDir.isDirectory()) {
-            Log.i("setupFiles", "Migrating old data from: " + sourceOldRoot.getAbsolutePath());
-
-            File[] sourceFiles = sourceOldRoot.listFiles();
-            if (sourceFiles != null) {
-                for (File file : sourceFiles) {
-                    String name = file.getName();
-                    if (name.equals("assets") || name.equals("2ship.o2r") || name.equals("mm.o2r")) {
-                        continue; // Skip these
-                    }
-
-                    File dest = new File(targetRootFolder, name);
-                    try {
-                        if (file.isDirectory()) {
-                            AssetCopyUtil.copyDirectory(file, dest);
-                        } else {
-                            AssetCopyUtil.copyFile(file, dest);
-                        }
-                        Log.i("setupFiles", "Migrated: " + name);
-                    } catch (IOException e) {
-                        Log.e("setupFiles", "Failed to migrate: " + name, e);
-                    }
-                }
-            }
-
-            runOnUiThread(() -> Toast.makeText(this, "Save data migrated", Toast.LENGTH_SHORT).show());
-        }
-
-        // Ensure root folder exists
-        if (!targetRootFolder.exists()) {
-            if (!targetRootFolder.mkdirs()) {
-                Log.e("setupFiles", "Failed to create root folder");
-                runOnUiThread(() -> Toast.makeText(this, "Failed to create folder", Toast.LENGTH_LONG).show());
-                setupLatch.countDown();
-                return;
-            }
-        }
-
-        // Always ensure mods folder exists
-        File targetModsDir = new File(targetRootFolder, "mods");
-        if (!targetModsDir.exists()) {
-            targetModsDir.mkdirs();
-        }
-
-        // Copy assets/ from internal
-        File targetAssetsDir = new File(targetRootFolder, "assets");
-        try {
-            if (!targetAssetsDir.exists()) {
-                targetAssetsDir.mkdirs();
-            }
-            AssetCopyUtil.copyAssetsToExternal(this, "assets", targetAssetsDir.getAbsolutePath());
-            runOnUiThread(() -> Toast.makeText(this, "Assets copied", Toast.LENGTH_SHORT).show());
-        } catch (IOException e) {
-            e.printStackTrace();
-            runOnUiThread(() -> Toast.makeText(this, "Error copying assets", Toast.LENGTH_LONG).show());
-        }
-
-        // Copy 2ship.o2r from internal assets (if bundled)
-        // Note: 2ship.o2r may not be bundled - it gets created by on-device ROM extraction
-        File targetOtrFile = new File(targetRootFolder, "2ship.o2r");
-        try {
-            String[] assetList = getAssets().list("");
-            boolean hasOtr = false;
-            if (assetList != null) {
-                for (String asset : assetList) {
-                    if ("2ship.o2r".equals(asset)) {
-                        hasOtr = true;
-                        break;
-                    }
-                }
-            }
-            if (hasOtr) {
-                try (InputStream in = getAssets().open("2ship.o2r");
-                     OutputStream out = new FileOutputStream(targetOtrFile)) {
-                    byte[] buffer = new byte[1024];
-                    int read;
-                    while ((read = in.read(buffer)) != -1) {
-                        out.write(buffer, 0, read);
-                    }
-                    runOnUiThread(() -> Toast.makeText(this, "2ship.o2r copied", Toast.LENGTH_SHORT).show());
-                }
-            } else {
-                Log.i("setupFiles", "2ship.o2r not bundled in APK - will be created by ROM extraction");
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-            runOnUiThread(() -> Toast.makeText(this, "Error copying 2ship.o2r", Toast.LENGTH_LONG).show());
-        }
-
-        setupLatch.countDown();
-    }
 
 
 
@@ -301,11 +127,12 @@ public class MainActivity extends SDLActivity{
         super.onActivityResult(requestCode, resultCode, data);
 
         if (requestCode == FILE_PICKER_REQUEST_CODE && resultCode == RESULT_OK && data != null) {
-            // Handle file selection
+            // Handle file selection (for native code initiated file picker)
             Uri selectedFileUri = data.getData();
             String fileName = "MM.z64";
 
-            File destinationDirectory = new File(Environment.getExternalStorageDirectory(), "2S2H");
+            // Use app's private external storage (Android/data/com.dishii.mm/files/)
+            File destinationDirectory = getExternalFilesDir(null);
             File destinationFile = new File(destinationDirectory, fileName);
 
             if (destinationDirectory != null && selectedFileUri != null) {
@@ -328,16 +155,6 @@ public class MainActivity extends SDLActivity{
 
             // Now pass the path of the file in the new folder
             nativeHandleSelectedFile(destinationFile.getPath());
-
-        } else if (requestCode == STORAGE_PERMISSION_REQUEST_CODE) {
-            // Handle MANAGE_EXTERNAL_STORAGE result
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                if (Environment.isExternalStorageManager()) {
-                    checkAndSetupFiles();
-                } else {
-                    Toast.makeText(this, "Storage permission is required to access files.", Toast.LENGTH_LONG).show();
-                }
-            }
         }
     }
 
@@ -350,13 +167,6 @@ public class MainActivity extends SDLActivity{
         // Start the file picker dialog
         startActivityForResult(intent, 0);
     }
-
-    // Check if external storage is available and writable
-    private boolean isExternalStorageWritable() {
-        String state = Environment.getExternalStorageState();
-        return Environment.MEDIA_MOUNTED.equals(state);
-    }
-
 
     public native void attachController();
     public native void detachController();
