@@ -567,6 +567,7 @@ void Menu::DrawElement() {
     std::vector<ImVec2> headerSizes;
 #ifdef __ANDROID__
     float headerWidth = 600.0f + style.ItemSpacing.x;
+    bool headerSearch = false; // Disabled on Android
 #else
     float headerWidth = style.ItemSpacing.x;
     bool headerSearch = !CVarGetInteger("gSettings.Menu.SidebarSearch", 0);

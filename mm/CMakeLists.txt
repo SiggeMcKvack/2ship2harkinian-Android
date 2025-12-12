@@ -558,11 +558,84 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "NintendoSwitch")
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Android")
     set(THREADS_PREFER_PTHREAD_FLAG ON)
     find_package(Threads REQUIRED)
+
+    # Fetch Ogg (required by Opus and Vorbis)
+    include(FetchContent)
+    FetchContent_Declare(
+        ogg
+        GIT_REPOSITORY https://github.com/xiph/ogg.git
+        GIT_TAG v1.3.5
+    )
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(ogg)
+
+    # Fetch Opus
+    FetchContent_Declare(
+        opus
+        GIT_REPOSITORY https://github.com/xiph/opus.git
+        GIT_TAG v1.5.2
+    )
+    set(OPUS_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(OPUS_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+    set(OPUS_FLOAT_APPROX ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(opus)
+    # Opus needs FLOAT_APPROX when ffast-math is used
+    target_compile_definitions(opus PRIVATE FLOAT_APPROX)
+
+    # Fetch Vorbis
+    FetchContent_Declare(
+        vorbis
+        GIT_REPOSITORY https://github.com/xiph/vorbis.git
+        GIT_TAG v1.3.7
+    )
+    set(OGG_INCLUDE_DIR ${ogg_SOURCE_DIR}/include ${ogg_BINARY_DIR}/include CACHE STRING "" FORCE)
+    set(OGG_LIBRARY ogg CACHE STRING "" FORCE)
+    FetchContent_MakeAvailable(vorbis)
+
+    # Fetch OpusFile (master has CMake support, v0.12 doesn't)
+    FetchContent_Declare(
+        opusfile
+        GIT_REPOSITORY https://github.com/xiph/opusfile.git
+        GIT_TAG master
+    )
+    set(OP_DISABLE_HTTP ON CACHE BOOL "" FORCE)
+    set(OP_DISABLE_EXAMPLES ON CACHE BOOL "" FORCE)
+    set(OP_DISABLE_DOCS ON CACHE BOOL "" FORCE)
+    # Set up required dependencies for opusfile CMake find_package
+    set(OPUS_INCLUDE_DIR "${opus_SOURCE_DIR}/include" CACHE STRING "" FORCE)
+    set(OPUS_LIBRARY opus CACHE STRING "" FORCE)
+    set(OGG_INCLUDE_DIRS "${ogg_SOURCE_DIR}/include;${ogg_BINARY_DIR}/include" CACHE STRING "" FORCE)
+    set(OGG_LIBRARIES ogg CACHE STRING "" FORCE)
+    FetchContent_MakeAvailable(opusfile)
+
+    # Create wrapper directory for opus headers (code expects <opus/opus.h>)
+    set(OPUS_WRAPPER_DIR "${CMAKE_BINARY_DIR}/opus_include_wrapper")
+    file(MAKE_DIRECTORY "${OPUS_WRAPPER_DIR}/opus")
+    file(GLOB OPUS_HEADERS "${opus_SOURCE_DIR}/include/*.h")
+    foreach(HEADER ${OPUS_HEADERS})
+        get_filename_component(HEADER_NAME ${HEADER} NAME)
+        configure_file(${HEADER} "${OPUS_WRAPPER_DIR}/opus/${HEADER_NAME}" COPYONLY)
+    endforeach()
+
+    # Add include directories for audio libs
+    include_directories(
+        ${ogg_SOURCE_DIR}/include
+        ${ogg_BINARY_DIR}/include
+        ${OPUS_WRAPPER_DIR}          # for <opus/opus.h>
+        ${vorbis_SOURCE_DIR}/include
+        ${opusfile_SOURCE_DIR}/include
+    )
+
     set(ADDITIONAL_LIBRARY_DEPENDENCIES
         "libultraship;"
         "ZAPDLib;"
         SDL2::SDL2
         Threads::Threads
+        ogg
+        opus
+        vorbis
+        vorbisfile
+        opusfile
     )
 elseif(CMAKE_SYSTEM_NAME STREQUAL "CafeOS")
     find_package(SDL2 REQUIRED)

@@ -70,7 +70,9 @@ static int16_t resample_table[64][4] = {
 };
 
 static void aMixImplSSE2(uint16_t count, int16_t gain, uint16_t in_addr, uint16_t out_addr);
+#if defined(__aarch64__)
 static void aMixImplNEON(uint16_t count, int16_t gain, uint16_t in_addr, uint16_t out_addr);
+#endif
 
 static inline int16_t clamp16(int32_t v) {
     if (v < -0x8000) {
@@ -359,7 +361,7 @@ static void aMixImplRef(uint16_t count, int16_t gain, uint16_t in_addr, uint16_t
 void aMixImpl(uint16_t count, int16_t gain, uint16_t in_addr, uint16_t out_addr) {
 #if defined(__SSE2__) || defined(_M_AMD64)
     aMixImplSSE2(count, gain, in_addr, out_addr);
-#elif defined(__ARM_NEON)
+#elif defined(__aarch64__)
     aMixImplNEON(count, gain, in_addr, out_addr);
 #else
     aMixImplRef(count, gain, in_addr, out_addr);
@@ -687,7 +689,8 @@ static void aMixImplSSE2(uint16_t count, int16_t gain, uint16_t in_addr, uint16_
     }
 }
 #endif
-#if defined(__ARM_NEON)
+#if defined(__aarch64__)
+// vmull_high_* intrinsics are AArch64-only, not available on 32-bit ARM
 #include <arm_neon.h>
 static const int32_t x4000Arr[4] = { 0x4000, 0x4000, 0x4000, 0x4000 };
 void aMixImplNEON(uint16_t count, int16_t gain, uint16_t in_addr, uint16_t out_addr) {

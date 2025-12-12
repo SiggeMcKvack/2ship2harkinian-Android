@@ -4,6 +4,7 @@
 #include "Rando/CheckTracker/CheckTracker.h"
 #include "build.h"
 #include "2s2h/BenGui/BenMenu.h"
+#include <sstream>
 
 // TODO: This block should come from elsewhere, tied to data in Rando::StaticData::Options
 std::unordered_map<int32_t, const char*> logicOptions = {

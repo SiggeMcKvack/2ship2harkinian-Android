@@ -4,6 +4,7 @@
 #include "2s2h/ShipUtils.h"
 #include <libultraship/bridge/consolevariablebridge.h>
 #include <spdlog/spdlog.h>
+#include <sstream>
 
 extern "C" {
 #include "functions.h"
