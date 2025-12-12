@@ -179,17 +179,20 @@ install(DIRECTORY "${CMAKE_SOURCE_DIR}/mm/assets/xml/" DESTINATION ./assets/xml 
 endif()
 
 if ("${CMAKE_SYSTEM_NAME}" STREQUAL "Android")
-file(COPY "${CMAKE_SOURCE_DIR}/mm/assets/extractor/" DESTINATION "${CMAKE_SOURCE_DIR}/Android/app/src/main/assets/assets/extractor")
-file(COPY "${CMAKE_SOURCE_DIR}/mm/assets/xml/" DESTINATION "${CMAKE_SOURCE_DIR}/Android/app/src/main/assets/assets/extractor/xmls")
-file(COPY "${CMAKE_SOURCE_DIR}/OTRExporter/CFG/filelists/" DESTINATION "${CMAKE_SOURCE_DIR}/Android/app/src/main/assets/assets/extractor/filelists")
-file(COPY "${CMAKE_SOURCE_DIR}/OTRExporter/CFG/ActorList_MM.txt" DESTINATION "${CMAKE_SOURCE_DIR}/Android/app/src/main/assets/assets/extractor/symbols")
-file(COPY "${CMAKE_SOURCE_DIR}/OTRExporter/CFG/ObjectList_MM.txt" DESTINATION "${CMAKE_SOURCE_DIR}/Android/app/src/main/assets/assets/extractor/symbols")
-file(COPY "${CMAKE_SOURCE_DIR}/OTRExporter/CFG/SymbolMap_MM.txt" DESTINATION "${CMAKE_SOURCE_DIR}/Android/app/src/main/assets/assets/extractor/symbols")
+# Copy extractor assets to match paths expected by Extract.cpp:
+# - assets/Config_*.xml
+# - assets/xml/
+# - assets/filelists/
+# - assets/symbols/
+file(COPY "${CMAKE_SOURCE_DIR}/mm/assets/extractor/" DESTINATION "${CMAKE_SOURCE_DIR}/Android/app/src/main/assets/assets")
+file(COPY "${CMAKE_SOURCE_DIR}/mm/assets/xml/" DESTINATION "${CMAKE_SOURCE_DIR}/Android/app/src/main/assets/assets/xml")
 endif()
 
 
 find_package(Python3 COMPONENTS Interpreter)
 
+# Asset extraction targets (not needed on Android - assets extracted on-device)
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Android")
 # Target to generate OTRs
 add_custom_target(
     ExtractAssets
@@ -223,6 +226,7 @@ add_custom_target(
     COMMENT "Generating 2ship.o2r..."
     DEPENDS ZAPD
 )
+endif()
 
 if(CMAKE_SYSTEM_NAME MATCHES "Linux")
 file(COPY ${CMAKE_SOURCE_DIR}/mm/linux/2s2hIcon.png DESTINATION ${CMAKE_CURRENT_BINARY_DIR})

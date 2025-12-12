@@ -127,10 +127,15 @@ public class MainActivity extends SDLActivity{
 
     // Check if storage permission is granted
     private boolean hasStoragePermission() {
-        return ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
-                == PackageManager.PERMISSION_GRANTED &&
-                ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                        == PackageManager.PERMISSION_GRANTED;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Android 11+ requires MANAGE_EXTERNAL_STORAGE
+            return Environment.isExternalStorageManager();
+        } else {
+            return ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
+                    == PackageManager.PERMISSION_GRANTED &&
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                            == PackageManager.PERMISSION_GRANTED;
+        }
     }
 
     private static final int STORAGE_PERMISSION_REQUEST_CODE = 2296;
@@ -251,19 +256,33 @@ public class MainActivity extends SDLActivity{
             runOnUiThread(() -> Toast.makeText(this, "Error copying assets", Toast.LENGTH_LONG).show());
         }
 
-        // Copy 2ship.o2r from internal assets
+        // Copy 2ship.o2r from internal assets (if bundled)
+        // Note: 2ship.o2r may not be bundled - it gets created by on-device ROM extraction
         File targetOtrFile = new File(targetRootFolder, "2ship.o2r");
-        try (InputStream in = getAssets().open("2ship.o2r");
-             OutputStream out = new FileOutputStream(targetOtrFile)) {
-
-            byte[] buffer = new byte[1024];
-            int read;
-            while ((read = in.read(buffer)) != -1) {
-                out.write(buffer, 0, read);
+        try {
+            String[] assetList = getAssets().list("");
+            boolean hasOtr = false;
+            if (assetList != null) {
+                for (String asset : assetList) {
+                    if ("2ship.o2r".equals(asset)) {
+                        hasOtr = true;
+                        break;
+                    }
+                }
             }
-
-            runOnUiThread(() -> Toast.makeText(this, "2ship.o2r copied", Toast.LENGTH_SHORT).show());
-
+            if (hasOtr) {
+                try (InputStream in = getAssets().open("2ship.o2r");
+                     OutputStream out = new FileOutputStream(targetOtrFile)) {
+                    byte[] buffer = new byte[1024];
+                    int read;
+                    while ((read = in.read(buffer)) != -1) {
+                        out.write(buffer, 0, read);
+                    }
+                    runOnUiThread(() -> Toast.makeText(this, "2ship.o2r copied", Toast.LENGTH_SHORT).show());
+                }
+            } else {
+                Log.i("setupFiles", "2ship.o2r not bundled in APK - will be created by ROM extraction");
+            }
         } catch (IOException e) {
             e.printStackTrace();
             runOnUiThread(() -> Toast.makeText(this, "Error copying 2ship.o2r", Toast.LENGTH_LONG).show());
