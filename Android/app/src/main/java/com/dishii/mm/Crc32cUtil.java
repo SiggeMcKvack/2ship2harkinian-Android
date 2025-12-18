@@ -56,4 +56,27 @@ public class Crc32cUtil {
 
         return (~crc) & 0xFFFFFFFFL;
     }
+
+    /**
+     * Streaming CRC32C calculator for processing data in chunks.
+     * Reduces memory usage by avoiding full file buffering.
+     */
+    public static class StreamingCrc32c {
+        private long crc = 0xFFFFFFFFL;
+
+        public void update(byte[] data, int offset, int len) {
+            for (int i = offset; i < offset + len; i++) {
+                int index = (int) ((crc ^ (data[i] & 0xFF)) & 0xFF);
+                crc = CRC32C_TABLE[index] ^ (crc >>> 8);
+            }
+        }
+
+        public long getValue() {
+            return (~crc) & 0xFFFFFFFFL;
+        }
+
+        public void reset() {
+            crc = 0xFFFFFFFFL;
+        }
+    }
 }

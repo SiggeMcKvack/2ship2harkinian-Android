@@ -5,7 +5,6 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.provider.OpenableColumns;
 
-import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 
 /**
@@ -73,26 +72,12 @@ public class RomValidator {
                 return status;
             }
 
-            // Read the ROM data
-            byte[] romData = readAllBytes(resolver, uri);
-            if (romData == null || romData.length < 16) {
-                status.result = ValidationResult.READ_ERROR;
-                status.message = "Failed to read ROM file.";
+            // Stream the ROM and calculate CRC without loading entire file into memory
+            status.crc32c = calculateStreamingCrc(resolver, uri, status);
+            if (status.result != null) {
+                // Error occurred during streaming (compression detected or read error)
                 return status;
             }
-
-            // Check if compressed
-            if (isCompressed(romData)) {
-                status.result = ValidationResult.COMPRESSED_FILE;
-                status.message = "File appears to be compressed (ZIP/RAR/7z). Please extract it first.";
-                return status;
-            }
-
-            // Convert to big-endian if needed
-            convertToBigEndian(romData);
-
-            // Calculate CRC32C
-            status.crc32c = Crc32cUtil.calculate(romData);
 
             // Check CRC against known good values
             if (status.crc32c == CRC_MM_US_10) {
@@ -119,6 +104,74 @@ public class RomValidator {
         return status;
     }
 
+    private static long calculateStreamingCrc(ContentResolver resolver, Uri uri, ValidationStatus status) {
+        final int BUFFER_SIZE = 65536;
+        byte[] buffer = new byte[BUFFER_SIZE];
+        Crc32cUtil.StreamingCrc32c crc = new Crc32cUtil.StreamingCrc32c();
+        int romFormat = 0;
+
+        try (InputStream is = resolver.openInputStream(uri)) {
+            if (is == null) {
+                status.result = ValidationResult.READ_ERROR;
+                status.message = "Failed to open ROM file.";
+                return 0;
+            }
+
+            int bytesRead;
+            boolean firstChunk = true;
+
+            while ((bytesRead = is.read(buffer)) != -1) {
+                if (firstChunk) {
+                    firstChunk = false;
+                    if (bytesRead < 16) {
+                        status.result = ValidationResult.READ_ERROR;
+                        status.message = "ROM file too small.";
+                        return 0;
+                    }
+                    if (isCompressed(buffer)) {
+                        status.result = ValidationResult.COMPRESSED_FILE;
+                        status.message = "File appears to be compressed (ZIP/RAR/7z). Please extract it first.";
+                        return 0;
+                    }
+                    romFormat = ((buffer[0] & 0xFF) << 24) |
+                            ((buffer[1] & 0xFF) << 16) |
+                            ((buffer[2] & 0xFF) << 8) |
+                            (buffer[3] & 0xFF);
+                }
+                convertChunkToBigEndian(buffer, bytesRead, romFormat);
+                crc.update(buffer, 0, bytesRead);
+            }
+            return crc.getValue();
+        } catch (Exception e) {
+            status.result = ValidationResult.READ_ERROR;
+            status.message = "Error reading ROM: " + e.getMessage();
+            return 0;
+        }
+    }
+
+    private static void convertChunkToBigEndian(byte[] data, int length, int romFormat) {
+        if (romFormat == MAGIC_Z64) {
+            return;
+        } else if (romFormat == MAGIC_N64) {
+            int alignedLen = (length / 4) * 4;
+            for (int i = 0; i < alignedLen; i += 4) {
+                byte t0 = data[i];
+                byte t1 = data[i + 1];
+                data[i] = data[i + 3];
+                data[i + 1] = data[i + 2];
+                data[i + 2] = t1;
+                data[i + 3] = t0;
+            }
+        } else if (romFormat == MAGIC_V64) {
+            int alignedLen = (length / 2) * 2;
+            for (int i = 0; i < alignedLen; i += 2) {
+                byte t = data[i];
+                data[i] = data[i + 1];
+                data[i + 1] = t;
+            }
+        }
+    }
+
     private static long getFileSize(ContentResolver resolver, Uri uri) {
         long size = -1;
         try (Cursor cursor = resolver.query(uri, null, null, null, null)) {
@@ -130,22 +183,6 @@ public class RomValidator {
             }
         }
         return size;
-    }
-
-    private static byte[] readAllBytes(ContentResolver resolver, Uri uri) {
-        try (InputStream is = resolver.openInputStream(uri);
-             ByteArrayOutputStream buffer = new ByteArrayOutputStream()) {
-            if (is == null) return null;
-
-            byte[] chunk = new byte[65536];
-            int bytesRead;
-            while ((bytesRead = is.read(chunk)) != -1) {
-                buffer.write(chunk, 0, bytesRead);
-            }
-            return buffer.toByteArray();
-        } catch (Exception e) {
-            return null;
-        }
     }
 
     private static boolean isValidSize(long size) {
@@ -171,40 +208,4 @@ public class RomValidator {
         return false;
     }
 
-    /**
-     * Convert ROM to big-endian format (matches BitConverter::RomToBigEndian in C++).
-     * Detects format from first 4 bytes and swaps if necessary.
-     */
-    private static void convertToBigEndian(byte[] data) {
-        if (data.length < 4) return;
-
-        // Read first 4 bytes as big-endian integer
-        int magic = ((data[0] & 0xFF) << 24) |
-                ((data[1] & 0xFF) << 16) |
-                ((data[2] & 0xFF) << 8) |
-                (data[3] & 0xFF);
-
-        if (magic == MAGIC_Z64) {
-            // Already big-endian, no conversion needed
-            return;
-        } else if (magic == MAGIC_N64) {
-            // Little-endian: swap every 4 bytes
-            for (int i = 0; i < data.length - 3; i += 4) {
-                byte t0 = data[i];
-                byte t1 = data[i + 1];
-                data[i] = data[i + 3];
-                data[i + 1] = data[i + 2];
-                data[i + 2] = t1;
-                data[i + 3] = t0;
-            }
-        } else if (magic == MAGIC_V64) {
-            // Byte-swapped: swap every 2 bytes
-            for (int i = 0; i < data.length - 1; i += 2) {
-                byte t = data[i];
-                data[i] = data[i + 1];
-                data[i + 1] = t;
-            }
-        }
-        // Unknown format - leave as-is, CRC check will fail if invalid
-    }
 }

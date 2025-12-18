@@ -320,6 +320,14 @@ public class LauncherActivity extends AppCompatActivity {
         super.onDestroy();
         if (executorService != null) {
             executorService.shutdown();
+            try {
+                if (!executorService.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                    executorService.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                executorService.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
         }
     }
 }

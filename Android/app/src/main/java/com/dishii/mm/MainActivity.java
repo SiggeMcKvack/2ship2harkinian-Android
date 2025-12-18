@@ -49,11 +49,20 @@ public class MainActivity extends SDLActivity{
         attachController();
     }
 
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        detachController();
+    }
+
     public static void waitForSetupFromNative() {
         try {
-            setupLatch.await();  // Block until setup is complete
+            if (!setupLatch.await(10, java.util.concurrent.TimeUnit.SECONDS)) {
+                Log.e("MainActivity", "Setup timeout - native code waited too long");
+            }
         } catch (InterruptedException e) {
-            e.printStackTrace();
+            Log.e("MainActivity", "Setup interrupted", e);
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -136,20 +145,19 @@ public class MainActivity extends SDLActivity{
             File destinationFile = new File(destinationDirectory, fileName);
 
             if (destinationDirectory != null && selectedFileUri != null) {
-                try {
-                    InputStream in = getContentResolver().openInputStream(selectedFileUri);
-                    OutputStream out = new FileOutputStream(destinationFile);
-
-                    byte[] buffer = new byte[4096];
+                try (InputStream in = getContentResolver().openInputStream(selectedFileUri);
+                     OutputStream out = new FileOutputStream(destinationFile)) {
+                    if (in == null) {
+                        Log.e("MainActivity", "Failed to open input stream for file copy");
+                        return;
+                    }
+                    byte[] buffer = new byte[65536];
                     int bytesRead;
                     while ((bytesRead = in.read(buffer)) != -1) {
                         out.write(buffer, 0, bytesRead);
                     }
-
-                    in.close();
-                    out.close();
                 } catch (IOException e) {
-                    e.printStackTrace();
+                    Log.e("MainActivity", "Error copying file", e);
                 }
             }
 
@@ -339,12 +347,13 @@ public class MainActivity extends SDLActivity{
             private float lastX = 0;
             private float lastY = 0;
             private boolean isTouching = false;
+            private long lastCameraUpdate = 0;
+            private static final long CAMERA_UPDATE_INTERVAL_MS = 16; // ~60fps cap
 
             @Override
             public boolean onTouch(View v, MotionEvent event) {
                 switch (event.getAction()) {
                     case MotionEvent.ACTION_DOWN:
-                        // Start tracking the finger's position
                         lastX = event.getX();
                         lastY = event.getY();
                         isTouching = true;
@@ -352,35 +361,34 @@ public class MainActivity extends SDLActivity{
 
                     case MotionEvent.ACTION_MOVE:
                         if (isTouching) {
-                            // Calculate the change in position (delta)
+                            long now = System.currentTimeMillis();
+                            if (now - lastCameraUpdate < CAMERA_UPDATE_INTERVAL_MS) {
+                                break;
+                            }
+                            lastCameraUpdate = now;
+
                             float deltaX = event.getX() - lastX;
                             float deltaY = event.getY() - lastY;
-
-                            // Update the last position
                             lastX = event.getX();
                             lastY = event.getY();
 
-                            // Increase sensitivity by using a larger multiplier
-                            // Adjust these multipliers to suit your needs
-                            float sensitivityMultiplier = 15; // Higher value for more sensitivity
+                            float sensitivityMultiplier = 15;
                             float rx = (deltaX * sensitivityMultiplier);
                             float ry = (deltaY * sensitivityMultiplier);
 
-                            // Send the mapped values to the joystick axes
-                            setCameraState(0, rx); // Right stick X axis
-                            setCameraState(1, ry); // Right stick Y axis
+                            setCameraState(0, rx);
+                            setCameraState(1, ry);
                         }
                         break;
 
                     case MotionEvent.ACTION_UP:
                     case MotionEvent.ACTION_CANCEL:
-                        // Stop tracking the finger's position and reset joystick input
                         isTouching = false;
-                        setCameraState(0, 0.0f); // Reset right stick X axis
-                        setCameraState(1, 0.0f); // Reset right stick Y axis
+                        setCameraState(0, 0.0f);
+                        setCameraState(1, 0.0f);
                         break;
                 }
-                return TouchAreaEnabled; // Event full handled
+                return TouchAreaEnabled;
             }
         });
     }

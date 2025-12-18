@@ -33,26 +33,12 @@ public class AssetCopyUtil {
                 // It's a file
                 File externalFile = new File(externalPath);
                 if (!externalFile.exists()) {
-                    // Check if the file exists in the external storage
-                    InputStream in = null;
-                    OutputStream out = null;
-
-                    try {
-                        in = assetManager.open(assetPath);
-                        out = new FileOutputStream(externalPath);
-
-                        byte[] buffer = new byte[1024];
+                    try (InputStream inStream = assetManager.open(assetPath);
+                         OutputStream outStream = new FileOutputStream(externalPath)) {
+                        byte[] buffer = new byte[65536];
                         int read;
-                        while ((read = in.read(buffer)) != -1) {
-                            out.write(buffer, 0, read);
-                        }
-
-                    } finally {
-                        if (in != null) {
-                            in.close();
-                        }
-                        if (out != null) {
-                            out.close();
+                        while ((read = inStream.read(buffer)) != -1) {
+                            outStream.write(buffer, 0, read);
                         }
                     }
                 }
@@ -64,7 +50,11 @@ public class AssetCopyUtil {
         if (!targetDir.exists()) {
             targetDir.mkdirs();
         }
-        for (File file : sourceDir.listFiles()) {
+        File[] files = sourceDir.listFiles();
+        if (files == null) {
+            return;
+        }
+        for (File file : files) {
             File dest = new File(targetDir, file.getName());
             if (file.isDirectory()) {
                 copyDirectory(file, dest);
